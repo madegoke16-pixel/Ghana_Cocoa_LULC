@@ -1,0 +1,35 @@
+.DS_Store
+.env
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Geospatial and tabular data
+data/raw/**
+data/external/**
+data/interim/**
+data/processed/**
+!data/**/.gitkeep
+*.tif
+*.tiff
+*.gpkg
+*.shp
+*.shx
+*.dbf
+*.prj
+*.cpg
+*.geojson
+*.parquet
+
+# Keep the project AOI required by the downloader.
+!assets/aoi_bounding_box.gpkg
+
+# Local editor settings
+.vscode/
+.idea/
+
+# Generated outputs
+outputs/**
+!outputs/**/.gitkeep

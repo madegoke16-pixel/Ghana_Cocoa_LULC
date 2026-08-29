@@ -1,0 +1,31 @@
+project:
+  name: ghana_cocoa_lulc_2026
+  country: Ghana
+  regions:
+    - western
+    - western_north
+    - ashanti
+
+analysis:
+  # Starter years only; revise to match imagery availability and research design.
+  baseline_year: 2015
+  comparison_years: [2020, 2025]
+  area_unit: hectares
+  projected_crs: EPSG:32630  # WGS 84 / UTM zone 30N
+  minimum_mapping_unit_ha: 0.5
+  nodata_value: 0
+
+inputs:
+  boundaries_dir: data/raw/boundaries
+  cocoa_dir: data/raw/cocoa
+  landcover_dir: data/raw/landcover
+  imagery_dir: data/raw/imagery
+
+outputs:
+  processed_dir: data/processed
+  maps_dir: outputs/maps
+  tables_dir: outputs/tables
+  figures_dir: outputs/figures
+  reports_dir: outputs/reports
+  logs_dir: outputs/logs
+
