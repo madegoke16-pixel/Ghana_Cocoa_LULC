@@ -92,7 +92,24 @@ def parse_args() -> argparse.Namespace:
         help="Projected grid-cell width/height. Keep small enough for EE's download limit.",
     )
     parser.add_argument("--grid-crs", default=DEFAULT_GRID_CRS)
-    parser.add_argument("--retries", type=int, default=3)
+    parser.add_argument(
+        "--retries",
+        type=int,
+        default=8,
+        help="Attempts per tile for transient Earth Engine or network failures.",
+    )
+    parser.add_argument(
+        "--ee-deadline-seconds",
+        type=int,
+        default=900,
+        help="Deadline for each Earth Engine API request (default: 900 seconds).",
+    )
+    parser.add_argument(
+        "--download-timeout-seconds",
+        type=int,
+        default=900,
+        help="Network timeout while transferring each GeoTIFF (default: 900 seconds).",
+    )
     parser.add_argument("--overwrite", action="store_true")
     return parser.parse_args()
 
@@ -167,10 +184,10 @@ def annual_mode(year: int, region: ee.Geometry) -> ee.Image:
     return collection.mode().rename("label").unmask(NODATA).toInt16()
 
 
-def download_file(url: str, destination: Path) -> None:
+def download_file(url: str, destination: Path, timeout_seconds: int) -> None:
     temporary = destination.with_suffix(destination.suffix + ".part")
     try:
-        with urlopen(url, timeout=300) as response, temporary.open("wb") as stream:
+        with urlopen(url, timeout=timeout_seconds) as response, temporary.open("wb") as stream:
             while chunk := response.read(1024 * 1024):
                 stream.write(chunk)
         temporary.replace(destination)
@@ -185,6 +202,7 @@ def download_tile(
     destination: Path,
     scale: float,
     retries: int,
+    download_timeout_seconds: int,
 ) -> None:
     region = ee.Geometry(geometry)
     parameters = {
@@ -197,20 +215,29 @@ def download_tile(
     for attempt in range(1, retries + 1):
         try:
             url = image.clip(region).getDownloadURL(parameters)
-            download_file(url, destination)
+            download_file(url, destination, download_timeout_seconds)
             return
-        except Exception:
+        except Exception as error:
             if attempt == retries:
                 raise
-            delay = 2**attempt
-            log(f"Download attempt {attempt} failed; retrying in {delay} seconds ...")
+            delay = min(60, 2**attempt)
+            detail = str(error).strip().replace("\n", " ")
+            log(
+                f"Attempt {attempt}/{retries} failed ({type(error).__name__}: {detail}); "
+                f"retrying in {delay} seconds ..."
+            )
             sleep(delay)
 
 
 def main() -> int:
     args = parse_args()
-    if args.scale <= 0 or args.retries < 1:
-        raise ValueError("--scale must be positive and --retries must be at least 1")
+    if (
+        args.scale <= 0
+        or args.retries < 1
+        or args.ee_deadline_seconds < 1
+        or args.download_timeout_seconds < 1
+    ):
+        raise ValueError("Scale, retries, and timeout values must be positive")
     if not args.ee_project:
         raise SystemExit("Provide --ee-project or set EARTHENGINE_PROJECT in .env/environment.")
 
@@ -229,6 +256,11 @@ def main() -> int:
     if args.authenticate:
         ee.Authenticate()
     ee.Initialize(project=args.ee_project)
+    ee.data.setDeadline(args.ee_deadline_seconds * 1000)
+    log(
+        f"Earth Engine deadline: {args.ee_deadline_seconds}s; "
+        f"retries per tile: {args.retries}"
+    )
     output_dir.mkdir(parents=True, exist_ok=True)
 
     entire_aoi = ee.Geometry(mapping(aoi.to_crs("EPSG:4326").geometry.union_all()))
@@ -243,7 +275,14 @@ def main() -> int:
                 log(f"[{index}/{len(tiles)}] Exists; skipping {destination.name}")
                 continue
             log(f"[{index}/{len(tiles)}] Downloading {destination.name}")
-            download_tile(image, geometry, destination, args.scale, args.retries)
+            download_tile(
+                image,
+                geometry,
+                destination,
+                args.scale,
+                args.retries,
+                args.download_timeout_seconds,
+            )
     log("Download complete.")
     return 0
 

@@ -65,6 +65,12 @@ The downloader reads `assets/aoi_bounding_box.gpkg` and writes tiled annual-mode
 GeoTIFFs to `data/raw/dynamicworld/`. Use `--help` for single-year, grid-size,
 retry, AOI-layer, and overwrite options.
 
+Interrupted downloads are resumable: run the same command again and existing tiles
+will be skipped. Slow Earth Engine computations use a 15-minute request deadline and
+eight retries by default; these can be changed with `--ee-deadline-seconds` and
+`--retries`.
+
+
 ## Important safeguards
 
 - Keep all datasets in a common projected CRS before area calculations.
