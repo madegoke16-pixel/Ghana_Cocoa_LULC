@@ -70,10 +70,10 @@ will be skipped. Slow Earth Engine computations use a 15-minute request deadline
 eight retries by default; these can be changed with `--ee-deadline-seconds` and
 `--retries`.
 
-## Export Sentinel-2 dry-season imagery
+## Download Sentinel-2 dry-season imagery
 
-Create ten band-specific, tiled GeoTIFF exports of a cloud-masked DJF median
-composite in Google Drive:
+Download a tiled, ten-band cloud-masked DJF median composite directly into the
+project:
 
 ```bash
 python scripts/sentinel2/download_sentinel2_djf.py \
@@ -82,8 +82,20 @@ python scripts/sentinel2/download_sentinel2_djf.py \
 ```
 
 The season labeled 2025 covers December 2024 through February 2025. The script
-reads the local project AOI, uses Cloud Score+ (`cs_cdf >= 0.60`), exports in
-`EPSG:32630` at 10 m, and splits large bands into 4096-pixel GeoTIFF shards.
+reads the local project AOI, uses Cloud Score+ (`cs_cdf >= 0.60`), downloads in
+`EPSG:32630` at 10 m, and writes resumable 10 km tiles under
+`data/raw/sentinel2/djf_<year>/`.
+
+For a wet-season composite (April-June by default), run:
+
+```bash
+python scripts/sentinel2/download_sentinel2_amj.py \
+  --year 2025 \
+  --ee-project YOUR_GOOGLE_CLOUD_PROJECT
+```
+
+Wet-season tiles are written under `data/raw/sentinel2/wet_<year>/`. Adjust the
+season definition with `--start-month` and `--end-month` when needed.
 
 
 ## Important safeguards
