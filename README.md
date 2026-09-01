@@ -97,6 +97,21 @@ python scripts/sentinel2/download_sentinel2_amj.py \
 Wet-season tiles are written under `data/raw/sentinel2/wet_<year>/`. Adjust the
 season definition with `--start-month` and `--end-month` when needed.
 
+## Download CHIRPS rainfall
+
+Download CHIRPS v3 Final Daily RNL rainfall, clip each day to the project AOI,
+and create daily, monthly, and annual summary tables:
+
+```bash
+python scripts/rainfall/download_chirps_v3_rnl.py \
+  --start-date 2000-01-01 \
+  --end-date 2025-12-31
+```
+
+Clipped rasters are stored under `data/processed/rainfall/chirps_v3_rnl/daily/`
+and CSV summaries under `outputs/tables/rainfall/`. The job is resumable and
+deletes each downloaded global source raster after successful clipping by default.
+
 
 ## Important safeguards
 
