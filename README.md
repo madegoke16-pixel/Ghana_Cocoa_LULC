@@ -97,7 +97,10 @@ python scripts/sentinel2/download_sentinel2_amj.py \
 Wet-season tiles are written under `data/raw/sentinel2/wet_<year>/`. Adjust the
 season definition with `--start-month` and `--end-month` when needed. A 10 km
 tile that exceeds Earth Engine memory is automatically replaced by four 5 km
-subtiles; reruns recognize both normal and fallback outputs.
+subtiles; reruns recognize both normal and fallback outputs. The AMJ downloader
+uses Level-1C TOA consistently for 2017-2018 because Earth Engine's historical
+Level-2A coverage is incomplete, and Level-2A surface reflectance thereafter.
+Override this choice with `--data-level toa` or `--data-level sr`.
 
 ## Download CHIRPS rainfall
 
@@ -113,6 +116,22 @@ python scripts/rainfall/download_chirps_v3_rnl.py \
 Clipped rasters are stored under `data/processed/rainfall/chirps_v3_rnl/daily/`
 and CSV summaries under `outputs/tables/rainfall/`. The job is resumable and
 deletes each downloaded global source raster after successful clipping by default.
+
+## Download CHIRTS temperature
+
+Original CHIRTS-daily ends in 2016, so the matching 2000-2025 temperature
+workflow uses the Climate Hazards Center's CHIRTS-ERA5 continuation:
+
+```bash
+python scripts/temperature/download_chirts_era5_daily.py \
+  --start-date 2000-01-01 \
+  --end-date 2025-12-31
+```
+
+The downloader reads only the remote AOI windows for daily Tmax and Tmin, writes
+two-band clipped GeoTIFFs under `data/processed/temperature/chirts_era5/daily/`,
+and creates daily, monthly, and annual CSV summaries under
+`outputs/tables/temperature/`.
 
 
 ## Important safeguards

@@ -49,6 +49,7 @@ from download_sentinel2_djf import (
 
 DEFAULT_START_MONTH = 4
 DEFAULT_END_MONTH = 6
+S2_TOA_COLLECTION = "COPERNICUS/S2_HARMONIZED"
 
 
 def parse_args() -> argparse.Namespace:
@@ -79,6 +80,12 @@ def parse_args() -> argparse.Namespace:
         help="Last included month (default: 6, June).",
     )
     parser.add_argument("--cloud-threshold", type=float, default=CLEAR_THRESHOLD)
+    parser.add_argument(
+        "--data-level",
+        choices=["auto", "sr", "toa"],
+        default="auto",
+        help="Sentinel-2 product: auto uses TOA for 2017-2018 and SR afterward.",
+    )
     parser.add_argument("--scale", type=float, default=TARGET_SCALE)
     parser.add_argument("--crs", default=TARGET_CRS)
     parser.add_argument("--tile-size-km", type=float, default=DEFAULT_TILE_SIZE_KM)
@@ -128,15 +135,26 @@ def season_dates(year: int, start_month: int, end_month: int) -> tuple[str, str]
     return start, end
 
 
+def select_collection(year: int, data_level: str) -> tuple[str, str]:
+    """Return the collection ID and a short filename label."""
+    selected = "toa" if data_level == "auto" and year <= 2018 else data_level
+    if selected == "auto":
+        selected = "sr"
+    if selected == "toa":
+        return S2_TOA_COLLECTION, "toa"
+    return S2_COLLECTION, "sr"
+
+
 def build_wet_collection(
     year: int,
     start_month: int,
     end_month: int,
     roi: ee.Geometry,
     threshold: float,
+    collection_id: str,
 ) -> tuple[ee.ImageCollection, int]:
     start, end = season_dates(year, start_month, end_month)
-    s2 = ee.ImageCollection(S2_COLLECTION).filterBounds(roi).filterDate(start, end)
+    s2 = ee.ImageCollection(collection_id).filterBounds(roi).filterDate(start, end)
     cloud_score = (
         ee.ImageCollection(CLOUD_SCORE_COLLECTION).filterBounds(roi).filterDate(start, end)
     )
@@ -156,10 +174,11 @@ def composite_for_tile(
     end_month: int,
     threshold: float,
     region: ee.Geometry,
+    collection_id: str,
 ) -> ee.Image:
     """Build a tile-local collection before linking and reducing it."""
     start, end = season_dates(year, start_month, end_month)
-    s2 = ee.ImageCollection(S2_COLLECTION).filterBounds(region).filterDate(start, end)
+    s2 = ee.ImageCollection(collection_id).filterBounds(region).filterDate(start, end)
     cloud_score = (
         ee.ImageCollection(CLOUD_SCORE_COLLECTION)
         .filterBounds(region)
@@ -204,6 +223,7 @@ def subdivide_geometry(geometry: dict, crs: str) -> list[tuple[int, int, dict]]:
 def main() -> int:
     args = parse_args()
     validate_args(args)
+    collection_id, level_label = select_collection(args.year, args.data_level)
     aoi_path = resolve_path(args.aoi)
     output_dir = resolve_path(args.output_root) / f"wet_{args.year}"
     aoi = read_aoi(aoi_path, args.aoi_layer)
@@ -222,6 +242,7 @@ def main() -> int:
         f"AOI: {aoi_path} ({len(aoi)} feature(s)); grid: {len(tiles)} tiles; "
         f"uncompressed estimate: {estimated_gb:.1f} GB"
     )
+    log(f"Sentinel-2 collection: {collection_id} ({level_label.upper()})")
 
     if args.authenticate:
         ee.Authenticate()
@@ -234,18 +255,19 @@ def main() -> int:
         args.end_month,
         entire_aoi,
         args.cloud_threshold,
+        collection_id,
     )
     output_dir.mkdir(parents=True, exist_ok=True)
 
     for index, (row, col, geometry) in enumerate(tiles, start=1):
         destination = output_dir / (
-            f"ghana_cocoa_s2_wet_{args.year}_r{row:03d}_c{col:03d}.tif"
+            f"ghana_cocoa_s2_wet_{args.year}_{level_label}_r{row:03d}_c{col:03d}.tif"
         )
         children = subdivide_geometry(geometry, args.crs)
         child_destinations = [
             output_dir
             / (
-                f"ghana_cocoa_s2_wet_{args.year}_r{row:03d}_c{col:03d}"
+                f"ghana_cocoa_s2_wet_{args.year}_{level_label}_r{row:03d}_c{col:03d}"
                 f"_s{subrow}{subcol}.tif"
             )
             for subrow, subcol, _ in children
@@ -268,6 +290,7 @@ def main() -> int:
             args.end_month,
             args.cloud_threshold,
             tile_region,
+            collection_id,
         )
         try:
             download_tile(
@@ -300,6 +323,7 @@ def main() -> int:
                     args.end_month,
                     args.cloud_threshold,
                     child_region,
+                    collection_id,
                 )
                 download_tile(
                     child_composite,
