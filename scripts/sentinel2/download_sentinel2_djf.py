@@ -21,6 +21,7 @@ import os
 from pathlib import Path
 from time import sleep
 from typing import Optional
+from urllib.error import HTTPError
 from urllib.request import urlopen
 
 import ee
@@ -195,9 +196,13 @@ def is_valid_tile(path: Path) -> bool:
 def download_file(url: str, destination: Path, timeout_seconds: int) -> None:
     temporary = destination.with_suffix(destination.suffix + ".part")
     try:
-        with urlopen(url, timeout=timeout_seconds) as response, temporary.open("wb") as stream:
-            while chunk := response.read(1024 * 1024):
-                stream.write(chunk)
+        try:
+            with urlopen(url, timeout=timeout_seconds) as response, temporary.open("wb") as stream:
+                while chunk := response.read(1024 * 1024):
+                    stream.write(chunk)
+        except HTTPError as error:
+            body = error.read().decode("utf-8", errors="replace").strip()
+            raise RuntimeError(f"Earth Engine HTTP {error.code}: {body}") from error
         if not is_valid_tile(temporary):
             raise RuntimeError(f"Downloaded file is not a valid {len(BANDS)}-band GeoTIFF")
         temporary.replace(destination)
@@ -221,10 +226,10 @@ def download_tile(
             download_file(url, destination, timeout_seconds)
             return
         except Exception as error:
-            if attempt == retries:
+            detail = str(error).strip().replace("\n", " ")
+            if "User memory limit exceeded" in detail or attempt == retries:
                 raise
             delay = min(60, 2**attempt)
-            detail = str(error).strip().replace("\n", " ")
             log(
                 f"Attempt {attempt}/{retries} failed ({type(error).__name__}: {detail}); "
                 f"retrying in {delay} seconds ..."

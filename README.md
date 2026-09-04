@@ -95,7 +95,9 @@ python scripts/sentinel2/download_sentinel2_amj.py \
 ```
 
 Wet-season tiles are written under `data/raw/sentinel2/wet_<year>/`. Adjust the
-season definition with `--start-month` and `--end-month` when needed.
+season definition with `--start-month` and `--end-month` when needed. A 10 km
+tile that exceeds Earth Engine memory is automatically replaced by four 5 km
+subtiles; reruns recognize both normal and fallback outputs.
 
 ## Download CHIRPS rainfall
 

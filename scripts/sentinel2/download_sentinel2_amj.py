@@ -21,7 +21,9 @@ import os
 from pathlib import Path
 
 import ee
-from shapely.geometry import mapping
+import geopandas as gpd
+from shapely.geometry import mapping, shape
+from shapely.geometry import box as shapely_box
 
 from download_sentinel2_djf import (
     BANDS,
@@ -126,13 +128,13 @@ def season_dates(year: int, start_month: int, end_month: int) -> tuple[str, str]
     return start, end
 
 
-def build_wet_composite(
+def build_wet_collection(
     year: int,
     start_month: int,
     end_month: int,
     roi: ee.Geometry,
     threshold: float,
-) -> tuple[ee.Image, int]:
+) -> tuple[ee.ImageCollection, int]:
     start, end = season_dates(year, start_month, end_month)
     s2 = ee.ImageCollection(S2_COLLECTION).filterBounds(roi).filterDate(start, end)
     cloud_score = (
@@ -145,8 +147,58 @@ def build_wet_composite(
     if not image_count:
         raise RuntimeError(f"No Sentinel-2 scenes found from {start} to {end}")
     log(f"Wet-season interval: {start} to {end} (end exclusive); scenes: {image_count}")
-    composite = collection.select(BANDS).median().round().toUint16().clip(roi).unmask(NODATA)
-    return composite, image_count
+    return collection, image_count
+
+
+def composite_for_tile(
+    year: int,
+    start_month: int,
+    end_month: int,
+    threshold: float,
+    region: ee.Geometry,
+) -> ee.Image:
+    """Build a tile-local collection before linking and reducing it."""
+    start, end = season_dates(year, start_month, end_month)
+    s2 = ee.ImageCollection(S2_COLLECTION).filterBounds(region).filterDate(start, end)
+    cloud_score = (
+        ee.ImageCollection(CLOUD_SCORE_COLLECTION)
+        .filterBounds(region)
+        .filterDate(start, end)
+    )
+    collection = s2.linkCollection(cloud_score, [CLOUD_SCORE_BAND]).map(
+        lambda image: mask_s2(image, threshold)
+    )
+    return (
+        collection
+        .select(BANDS)
+        .median()
+        .round()
+        .toUint16()
+        .clip(region)
+        .unmask(NODATA)
+    )
+
+
+def subdivide_geometry(geometry: dict, crs: str) -> list[tuple[int, int, dict]]:
+    """Split one WGS84 tile into four projected quadrants."""
+    projected = gpd.GeoSeries([shape(geometry)], crs="EPSG:4326").to_crs(crs).iloc[0]
+    min_x, min_y, max_x, max_y = projected.bounds
+    mid_x = (min_x + max_x) / 2
+    mid_y = (min_y + max_y) / 2
+    cells = [
+        (0, 0, shapely_box(min_x, min_y, mid_x, mid_y)),
+        (0, 1, shapely_box(mid_x, min_y, max_x, mid_y)),
+        (1, 0, shapely_box(min_x, mid_y, mid_x, max_y)),
+        (1, 1, shapely_box(mid_x, mid_y, max_x, max_y)),
+    ]
+    children = []
+    for subrow, subcol, cell in cells:
+        clipped = projected.intersection(cell)
+        if clipped.is_empty or clipped.area <= 0:
+            continue
+        wgs84 = gpd.GeoSeries([clipped], crs=crs).to_crs("EPSG:4326").iloc[0]
+        children.append((subrow, subcol, mapping(wgs84)))
+    return children
 
 
 def main() -> int:
@@ -176,7 +228,7 @@ def main() -> int:
     ee.Initialize(project=args.ee_project)
     ee.data.setDeadline(args.ee_deadline_seconds * 1000)
     entire_aoi = ee.Geometry(mapping(aoi.to_crs("EPSG:4326").geometry.union_all()))
-    composite, _ = build_wet_composite(
+    collection, _ = build_wet_collection(
         args.year,
         args.start_month,
         args.end_month,
@@ -189,19 +241,75 @@ def main() -> int:
         destination = output_dir / (
             f"ghana_cocoa_s2_wet_{args.year}_r{row:03d}_c{col:03d}.tif"
         )
+        children = subdivide_geometry(geometry, args.crs)
+        child_destinations = [
+            output_dir
+            / (
+                f"ghana_cocoa_s2_wet_{args.year}_r{row:03d}_c{col:03d}"
+                f"_s{subrow}{subcol}.tif"
+            )
+            for subrow, subcol, _ in children
+        ]
         if destination.exists() and not args.overwrite and is_valid_tile(destination):
             log(f"[{index}/{len(tiles)}] Valid tile exists; skipping {destination.name}")
             continue
+        if (
+            not args.overwrite
+            and child_destinations
+            and all(is_valid_tile(path) for path in child_destinations)
+        ):
+            log(f"[{index}/{len(tiles)}] Valid fallback subtiles exist; skipping r{row:03d}_c{col:03d}")
+            continue
         log(f"[{index}/{len(tiles)}] Downloading {destination.name}")
-        download_tile(
-            composite,
-            geometry,
-            destination,
-            args.crs,
-            args.scale,
-            args.retries,
-            args.download_timeout_seconds,
+        tile_region = ee.Geometry(geometry)
+        composite = composite_for_tile(
+            args.year,
+            args.start_month,
+            args.end_month,
+            args.cloud_threshold,
+            tile_region,
         )
+        try:
+            download_tile(
+                composite,
+                geometry,
+                destination,
+                args.crs,
+                args.scale,
+                args.retries,
+                args.download_timeout_seconds,
+            )
+        except Exception as error:
+            if "User memory limit exceeded" not in str(error):
+                raise
+            log(
+                f"[{index}/{len(tiles)}] Earth Engine memory limit for 10 km tile; "
+                "using four 5 km fallback subtiles."
+            )
+            for (subrow, subcol, child_geometry), child_path in zip(
+                children, child_destinations
+            ):
+                if not args.overwrite and is_valid_tile(child_path):
+                    log(f"Valid fallback subtile exists; skipping {child_path.name}")
+                    continue
+                log(f"Downloading fallback subtile {child_path.name}")
+                child_region = ee.Geometry(child_geometry)
+                child_composite = composite_for_tile(
+                    args.year,
+                    args.start_month,
+                    args.end_month,
+                    args.cloud_threshold,
+                    child_region,
+                )
+                download_tile(
+                    child_composite,
+                    child_geometry,
+                    child_path,
+                    args.crs,
+                    args.scale,
+                    args.retries,
+                    args.download_timeout_seconds,
+                )
 
     log(f"Download complete: {output_dir}")
     return 0
