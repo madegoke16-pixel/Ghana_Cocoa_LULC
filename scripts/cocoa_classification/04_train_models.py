@@ -20,13 +20,13 @@ from sklearn.neural_network import MLPClassifier
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
-from common import FEATURE_NAMES, log, resolve, write_json_atomic
+from common import ANNUAL_FEATURE_NAMES, FEATURE_NAMES, log, resolve, write_json_atomic
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train RF, XGBoost, and MLP cocoa classifiers.")
     parser.add_argument("--year", type=int, default=2017)
-    parser.add_argument("--season", choices=("djf", "amj"), default="djf")
+    parser.add_argument("--season", choices=("djf", "wet", "annual"), default="annual")
     parser.add_argument("--samples", type=Path)
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--test-fraction", type=float, default=0.25)
@@ -38,8 +38,11 @@ def parse_args() -> argparse.Namespace:
 def build_models(seed: int, n_jobs: int) -> dict:
     try:
         from xgboost import XGBClassifier
-    except ImportError as error:
-        raise RuntimeError("XGBoost is required; run: python -m pip install -r requirements.txt") from error
+    except Exception as error:
+        raise RuntimeError(
+            "XGBoost could not be loaded. Install the Python requirements; on macOS "
+            "also install its OpenMP runtime with: brew install libomp"
+        ) from error
     impute = [("imputer", SimpleImputer(strategy="median"))]
     return {
         "random_forest": Pipeline(impute + [("model", RandomForestClassifier(
@@ -67,7 +70,8 @@ def main() -> int:
     samples_path = resolve(args.samples or Path(f"data/interim/cocoa_classification/{args.year}/{args.season}/training_samples.csv"))
     output_dir = resolve(args.output_dir or Path(f"models/cocoa_classification/{args.year}/{args.season}"))
     data = pd.read_csv(samples_path)
-    required = set(FEATURE_NAMES) | {"label", "spatial_group"}
+    feature_names = ANNUAL_FEATURE_NAMES if args.season == "annual" else FEATURE_NAMES
+    required = set(feature_names) | {"label", "spatial_group"}
     if missing := required - set(data.columns):
         raise ValueError(f"Training data lacks fields: {sorted(missing)}")
     if data["label"].nunique() != 2 or data["spatial_group"].nunique() < 4:
@@ -81,9 +85,9 @@ def main() -> int:
     metric_rows = []
     for name, model in build_models(args.seed, args.n_jobs).items():
         log(f"Training {name} on {len(train)} samples; spatial holdout={len(test)}")
-        model.fit(train[list(FEATURE_NAMES)], train["label"])
-        predicted = model.predict(test[list(FEATURE_NAMES)])
-        probability = model.predict_proba(test[list(FEATURE_NAMES)])[:, 1]
+        model.fit(train[list(feature_names)], train["label"])
+        predicted = model.predict(test[list(feature_names)])
+        probability = model.predict_proba(test[list(feature_names)])[:, 1]
         metrics = {
             "model": name,
             "accuracy": accuracy_score(test["label"], predicted),
@@ -95,14 +99,14 @@ def main() -> int:
         }
         metric_rows.append(metrics)
         artifact = {
-            "pipeline": model, "feature_names": list(FEATURE_NAMES),
+            "pipeline": model, "feature_names": list(feature_names),
             "classes": {0: "natural_tree", 1: "cocoa"}, "year": args.year,
             "season": args.season, "spatial_holdout_metrics": metrics,
         }
         joblib.dump(artifact, output_dir / f"{name}.joblib")
         importance = permutation_importance(
             model,
-            test[list(FEATURE_NAMES)],
+            test[list(feature_names)],
             test["label"],
             scoring="f1",
             n_repeats=10,
@@ -111,7 +115,7 @@ def main() -> int:
         )
         pd.DataFrame(
             {
-                "feature": FEATURE_NAMES,
+                "feature": feature_names,
                 "permutation_importance_mean": importance.importances_mean,
                 "permutation_importance_std": importance.importances_std,
             }

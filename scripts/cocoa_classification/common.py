@@ -14,6 +14,9 @@ import rasterio
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 BAND_NAMES = ("B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8A", "B11", "B12")
 FEATURE_NAMES = ("NDVI", "EVI", "NDRE", "NDRE2", "NDMI", "NBR", "GNDVI", "SAVI", "RECI", "IRECI")
+ANNUAL_FEATURE_NAMES = tuple(f"DJF_{name}" for name in FEATURE_NAMES) + tuple(
+    f"WET_{name}" for name in FEATURE_NAMES
+)
 S2_NODATA = 65535
 FLOAT_NODATA = -9999.0
 
@@ -78,4 +81,3 @@ def write_json_atomic(payload: dict, path: Path) -> None:
     temporary = path.with_suffix(".part.json")
     temporary.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     temporary.replace(path)
-

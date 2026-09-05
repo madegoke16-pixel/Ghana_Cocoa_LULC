@@ -15,7 +15,7 @@ from common import FLOAT_NODATA, log, resolve
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Mosaic cocoa classification and probability tiles.")
     parser.add_argument("--year", type=int, default=2017)
-    parser.add_argument("--season", choices=("djf", "amj"), default="djf")
+    parser.add_argument("--season", choices=("djf", "wet", "annual"), default="annual")
     parser.add_argument("--model", choices=("random_forest", "xgboost", "mlp"), default="random_forest")
     parser.add_argument("--input-dir", type=Path)
     parser.add_argument("--output-dir", type=Path, default=Path("data/processed/cocoa_classification/mosaics"))

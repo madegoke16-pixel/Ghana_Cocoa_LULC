@@ -17,13 +17,13 @@ import numpy as np
 import pandas as pd
 import rasterio
 
-from common import FEATURE_NAMES, FLOAT_NODATA, log, resolve
+from common import FLOAT_NODATA, log, resolve
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Prepare cocoa and pseudo-natural tree training samples.")
     parser.add_argument("--year", type=int, default=2017)
-    parser.add_argument("--season", choices=("djf", "amj"), default="djf")
+    parser.add_argument("--season", choices=("djf", "wet", "annual"), default="annual")
     parser.add_argument("--cocoa-points", type=Path, default=Path("assets/Cocoa_500_samples_2017.kml"))
     parser.add_argument("--feature-dir", type=Path)
     parser.add_argument("--mask-dir", type=Path)
@@ -44,9 +44,10 @@ def main() -> int:
     if args.negative_ratio <= 0 or args.exclusion_buffer_m < 0 or args.spatial_block_km <= 0:
         raise ValueError("Ratios/block size must be positive and the exclusion buffer cannot be negative")
     feature_dir = resolve(args.feature_dir or Path(f"data/interim/cocoa_classification/{args.year}/{args.season}/features"))
-    mask_dir = resolve(args.mask_dir or Path(f"data/interim/cocoa_classification/{args.year}/{args.season}/tree_masks"))
+    mask_season = "djf" if args.season == "annual" else args.season
+    mask_dir = resolve(args.mask_dir or Path(f"data/interim/cocoa_classification/{args.year}/{mask_season}/tree_masks"))
     output = resolve(args.output or Path(f"data/interim/cocoa_classification/{args.year}/{args.season}/training_samples.gpkg"))
-    feature_tiles = sorted(feature_dir.glob(f"ghana_cocoa_indices_{args.year}_*.tif"))
+    feature_tiles = sorted(feature_dir.glob(f"*indices_{args.year}_*.tif"))
     if not feature_tiles:
         raise FileNotFoundError(f"No feature tiles found in {feature_dir}")
     points = gpd.read_file(resolve(args.cocoa_points))
@@ -57,12 +58,15 @@ def main() -> int:
 
     with rasterio.open(feature_tiles[0]) as reference:
         target_crs = reference.crs
+        feature_names = tuple(reference.descriptions)
+        if not feature_names or any(name is None for name in feature_names):
+            raise ValueError(f"Feature bands require descriptions: {feature_tiles[0]}")
     cocoa = points.to_crs(target_crs)
     cocoa_xy = np.column_stack((cocoa.geometry.x, cocoa.geometry.y))
     positives: Dict[int, dict] = {}
 
     for feature_path in feature_tiles:
-        mask_path = mask_dir / feature_path.name.replace("indices", "dw_tree")
+        mask_path = mask_dir / feature_path.name.replace("annual_indices", "dw_tree").replace("indices", "dw_tree")
         if not mask_path.exists():
             raise FileNotFoundError(f"Paired tree mask missing: {mask_path}")
         with rasterio.open(feature_path) as features, rasterio.open(mask_path) as mask:
@@ -79,7 +83,7 @@ def main() -> int:
                     positives.setdefault(
                         row.source_id,
                         {"source_id": row.source_id, "label": 1, "class_name": "cocoa", "x": row.geometry.x, "y": row.geometry.y,
-                         **dict(zip(FEATURE_NAMES, values.astype(float)))},
+                         **dict(zip(feature_names, values.astype(float)))},
                     )
     if len(positives) < 20:
         raise RuntimeError(f"Only {len(positives)} cocoa points fall on valid Dynamic World tree pixels; inspect alignment and labels")
@@ -91,7 +95,7 @@ def main() -> int:
     per_tile = max(20, int(np.ceil(requested_negatives * 8 / len(feature_tiles))))
     buffer_squared = args.exclusion_buffer_m ** 2
     for feature_path in feature_tiles:
-        mask_path = mask_dir / feature_path.name.replace("indices", "dw_tree")
+        mask_path = mask_dir / feature_path.name.replace("annual_indices", "dw_tree").replace("indices", "dw_tree")
         with rasterio.open(feature_path) as features, rasterio.open(mask_path) as mask:
             tree_rows, tree_cols = np.where(mask.read(1) == 1)
             if not len(tree_rows):
@@ -107,7 +111,7 @@ def main() -> int:
                 if valid_vector(vector):
                     candidates.append(
                         {"source_id": None, "label": 0, "class_name": "pseudo_natural", "x": x, "y": y,
-                         **dict(zip(FEATURE_NAMES, vector.astype(float)))}
+                         **dict(zip(feature_names, vector.astype(float)))}
                     )
     if len(candidates) < requested_negatives:
         raise RuntimeError(f"Found only {len(candidates)} eligible pseudo-natural pixels; requested {requested_negatives}")
@@ -135,4 +139,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

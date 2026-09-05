@@ -34,14 +34,15 @@ Run the pipeline from the repository root:
 ```bash
 python scripts/cocoa_classification/01_create_dw_tree_mask.py --year 2017 --season djf
 python scripts/cocoa_classification/02_calculate_spectral_indices.py --year 2017 --season djf
-python scripts/cocoa_classification/03_prepare_training_samples.py --year 2017 --season djf
-python scripts/cocoa_classification/04_train_models.py --year 2017 --season djf
+python scripts/cocoa_classification/02b_build_annual_feature_stack.py --year 2017
+python scripts/cocoa_classification/03_prepare_training_samples.py --year 2017 --season annual
+python scripts/cocoa_classification/04_train_models.py --year 2017 --season annual
 
-python scripts/cocoa_classification/05_predict_tree_classes.py --year 2017 --season djf --model random_forest
-python scripts/cocoa_classification/05_predict_tree_classes.py --year 2017 --season djf --model xgboost
-python scripts/cocoa_classification/05_predict_tree_classes.py --year 2017 --season djf --model mlp
+python scripts/cocoa_classification/05_predict_tree_classes.py --year 2017 --season annual --model random_forest
+python scripts/cocoa_classification/05_predict_tree_classes.py --year 2017 --season annual --model xgboost
+python scripts/cocoa_classification/05_predict_tree_classes.py --year 2017 --season annual --model mlp
 
-python scripts/cocoa_classification/06_mosaic_tree_classification.py --year 2017 --season djf --model random_forest
+python scripts/cocoa_classification/06_mosaic_tree_classification.py --year 2017 --season annual --model random_forest
 ```
 
 The model comparison uses a spatial-group holdout rather than a random pixel

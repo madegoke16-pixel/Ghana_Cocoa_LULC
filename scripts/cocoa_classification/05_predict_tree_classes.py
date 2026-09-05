@@ -10,13 +10,13 @@ import joblib
 import numpy as np
 import rasterio
 
-from common import FEATURE_NAMES, FLOAT_NODATA, log, resolve, tiled_profile
+from common import FLOAT_NODATA, log, resolve, tiled_profile
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Apply a trained model to tiled tree-mask features.")
     parser.add_argument("--year", type=int, default=2017)
-    parser.add_argument("--season", choices=("djf", "amj"), default="djf")
+    parser.add_argument("--season", choices=("djf", "wet", "annual"), default="annual")
     parser.add_argument("--model", choices=("random_forest", "xgboost", "mlp"), default="random_forest")
     parser.add_argument("--model-file", type=Path)
     parser.add_argument("--feature-dir", type=Path)
@@ -33,18 +33,21 @@ def main() -> int:
         raise ValueError("--threshold must be between 0 and 1")
     model_path = resolve(args.model_file or Path(f"models/cocoa_classification/{args.year}/{args.season}/{args.model}.joblib"))
     feature_dir = resolve(args.feature_dir or Path(f"data/interim/cocoa_classification/{args.year}/{args.season}/features"))
-    mask_dir = resolve(args.mask_dir or Path(f"data/interim/cocoa_classification/{args.year}/{args.season}/tree_masks"))
+    mask_season = "djf" if args.season == "annual" else args.season
+    mask_dir = resolve(args.mask_dir or Path(f"data/interim/cocoa_classification/{args.year}/{mask_season}/tree_masks"))
     output_dir = resolve(args.output_dir or Path(f"data/processed/cocoa_classification/{args.year}/{args.season}/{args.model}"))
     artifact = joblib.load(model_path)
     model, names = artifact["pipeline"], tuple(artifact["feature_names"])
-    if names != FEATURE_NAMES:
-        raise ValueError(f"Model feature order {names} does not match raster order {FEATURE_NAMES}")
-    tiles = sorted(feature_dir.glob(f"ghana_cocoa_indices_{args.year}_*.tif"))
+    tiles = sorted(feature_dir.glob(f"*indices_{args.year}_*.tif"))
     if not tiles:
         raise FileNotFoundError(f"No feature tiles found in {feature_dir}")
+    with rasterio.open(tiles[0]) as first_tile:
+        raster_names = tuple(first_tile.descriptions)
+    if names != raster_names:
+        raise ValueError(f"Model feature order {names} does not match raster order {raster_names}")
     output_dir.mkdir(parents=True, exist_ok=True)
     for index, feature_path in enumerate(tiles, 1):
-        mask_path = mask_dir / feature_path.name.replace("indices", "dw_tree")
+        mask_path = mask_dir / feature_path.name.replace("annual_indices", "dw_tree").replace("indices", "dw_tree")
         class_path = output_dir / feature_path.name.replace("indices", f"tree_class_{args.model}")
         probability_path = output_dir / feature_path.name.replace("indices", f"cocoa_probability_{args.model}")
         if class_path.exists() and probability_path.exists() and not args.overwrite:
@@ -79,4 +82,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
