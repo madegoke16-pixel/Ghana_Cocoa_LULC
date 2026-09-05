@@ -33,8 +33,7 @@ def main() -> int:
         raise ValueError("--threshold must be between 0 and 1")
     model_path = resolve(args.model_file or Path(f"models/cocoa_classification/{args.year}/{args.season}/{args.model}.joblib"))
     feature_dir = resolve(args.feature_dir or Path(f"data/interim/cocoa_classification/{args.year}/{args.season}/features"))
-    mask_season = "djf" if args.season == "annual" else args.season
-    mask_dir = resolve(args.mask_dir or Path(f"data/interim/cocoa_classification/{args.year}/{mask_season}/tree_masks"))
+    mask_dir = resolve(args.mask_dir or Path(f"data/interim/cocoa_classification/{args.year}/annual/tree_masks"))
     output_dir = resolve(args.output_dir or Path(f"data/processed/cocoa_classification/{args.year}/{args.season}/{args.model}"))
     artifact = joblib.load(model_path)
     model, names = artifact["pipeline"], tuple(artifact["feature_names"])

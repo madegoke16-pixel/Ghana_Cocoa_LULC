@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Align Dynamic World class 1 (trees) to every Sentinel-2 tile."""
+"""Align yearly Dynamic World class 1 (trees) to the annual reference grid.
+
+Dynamic World is not seasonal. DJF Sentinel-2 tiles are used only as the 10 m
+reference grid so the yearly tree mask aligns with the two-season feature stack.
+"""
 
 from __future__ import annotations
 
@@ -15,11 +19,16 @@ from common import log, paired_name, resolve, tiled_profile
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Create tiled 10 m Dynamic World tree masks.")
+    parser = argparse.ArgumentParser(description="Create tiled 10 m yearly Dynamic World tree masks.")
     parser.add_argument("--year", type=int, default=2017)
-    parser.add_argument("--season", choices=("djf", "amj"), default="djf")
     parser.add_argument("--dw-raster", type=Path)
-    parser.add_argument("--sentinel-dir", type=Path)
+    parser.add_argument(
+        "--reference-sentinel-dir",
+        "--sentinel-dir",
+        dest="reference_sentinel_dir",
+        type=Path,
+        help="Sentinel tile directory used only to define the output grid (default: DJF).",
+    )
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--tree-class", type=int, default=1)
     parser.add_argument("--overwrite", action="store_true")
@@ -29,9 +38,9 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     dw_path = resolve(args.dw_raster or Path(f"data/processed/dynamicworld/ghana_cocoa_dynamicworld_{args.year}_mode_clipped.tif"))
-    sentinel_dir = resolve(args.sentinel_dir or Path(f"data/raw/sentinel2/{args.season}_{args.year}"))
-    output_dir = resolve(args.output_dir or Path(f"data/interim/cocoa_classification/{args.year}/{args.season}/tree_masks"))
-    tiles = sorted(sentinel_dir.glob(f"ghana_cocoa_s2_{args.season}_{args.year}_*.tif"))
+    sentinel_dir = resolve(args.reference_sentinel_dir or Path(f"data/raw/sentinel2/djf_{args.year}"))
+    output_dir = resolve(args.output_dir or Path(f"data/interim/cocoa_classification/{args.year}/annual/tree_masks"))
+    tiles = sorted(sentinel_dir.glob(f"ghana_cocoa_s2_djf_{args.year}_*.tif"))
     if not dw_path.exists() or not tiles:
         raise FileNotFoundError(f"Missing Dynamic World raster or Sentinel tiles: {dw_path}, {sentinel_dir}")
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -39,7 +48,7 @@ def main() -> int:
         if dw.count != 1 or dw.crs is None:
             raise ValueError("Dynamic World input must be a one-band georeferenced raster")
         for index, tile in enumerate(tiles, 1):
-            destination = output_dir / paired_name(tile, f"s2_{args.season}", "dw_tree")
+            destination = output_dir / paired_name(tile, "s2_djf", "dw_tree")
             if destination.exists() and not args.overwrite:
                 log(f"[{index}/{len(tiles)}] Exists; skipping {destination.name}")
                 continue
@@ -65,4 +74,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

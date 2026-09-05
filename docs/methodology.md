@@ -32,7 +32,7 @@ effective 10 m analysis grid, not native 10 m information for every band.
 Run the pipeline from the repository root:
 
 ```bash
-python scripts/cocoa_classification/01_create_dw_tree_mask.py --year 2017 --season djf
+python scripts/cocoa_classification/01_create_dw_tree_mask.py --year 2017
 python scripts/cocoa_classification/02_calculate_spectral_indices.py --year 2017 --season djf
 python scripts/cocoa_classification/02b_build_annual_feature_stack.py --year 2017
 python scripts/cocoa_classification/03_prepare_training_samples.py --year 2017 --season annual

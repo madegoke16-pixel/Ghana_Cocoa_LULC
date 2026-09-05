@@ -15,7 +15,12 @@ from common import BAND_NAMES, FEATURE_NAMES, FLOAT_NODATA, S2_NODATA, calculate
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Create tiled Sentinel-2 spectral-index stacks.")
     parser.add_argument("--year", type=int, default=2017)
-    parser.add_argument("--season", choices=("djf", "amj"), default="djf")
+    parser.add_argument(
+        "--season",
+        choices=("djf", "wet"),
+        default="djf",
+        help="Sentinel-2 composite season; wet reads data/raw/sentinel2/wet_<year>.",
+    )
     parser.add_argument("--sentinel-dir", type=Path)
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--scale-factor", type=float, default=10000.0)

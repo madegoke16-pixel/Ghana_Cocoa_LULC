@@ -44,8 +44,7 @@ def main() -> int:
     if args.negative_ratio <= 0 or args.exclusion_buffer_m < 0 or args.spatial_block_km <= 0:
         raise ValueError("Ratios/block size must be positive and the exclusion buffer cannot be negative")
     feature_dir = resolve(args.feature_dir or Path(f"data/interim/cocoa_classification/{args.year}/{args.season}/features"))
-    mask_season = "djf" if args.season == "annual" else args.season
-    mask_dir = resolve(args.mask_dir or Path(f"data/interim/cocoa_classification/{args.year}/{mask_season}/tree_masks"))
+    mask_dir = resolve(args.mask_dir or Path(f"data/interim/cocoa_classification/{args.year}/annual/tree_masks"))
     output = resolve(args.output or Path(f"data/interim/cocoa_classification/{args.year}/{args.season}/training_samples.gpkg"))
     feature_tiles = sorted(feature_dir.glob(f"*indices_{args.year}_*.tif"))
     if not feature_tiles:
