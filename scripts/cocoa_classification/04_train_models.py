@@ -30,6 +30,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--samples", type=Path)
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--test-fraction", type=float, default=0.25)
+    parser.add_argument(
+        "--split-attempts",
+        type=int,
+        default=500,
+        help="Candidate spatial-group splits searched for two-class train/test sets.",
+    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--n-jobs", type=int, default=-1)
     return parser.parse_args()
@@ -63,10 +69,45 @@ def build_models(seed: int, n_jobs: int) -> dict:
     }
 
 
+def select_spatial_split(
+    data: pd.DataFrame, test_fraction: float, seed: int, attempts: int
+) -> tuple[np.ndarray, np.ndarray]:
+    """Choose a valid group-disjoint split with both classes on both sides."""
+    splitter = GroupShuffleSplit(
+        n_splits=attempts, test_size=test_fraction, random_state=seed
+    )
+    overall_cocoa_rate = float(data["label"].mean())
+    best = None
+    best_score = float("inf")
+    for train_index, test_index in splitter.split(
+        data, data["label"], groups=data["spatial_group"]
+    ):
+        train_labels = data.iloc[train_index]["label"]
+        test_labels = data.iloc[test_index]["label"]
+        if train_labels.nunique() != 2 or test_labels.nunique() != 2:
+            continue
+        observed_fraction = len(test_index) / len(data)
+        score = abs(observed_fraction - test_fraction) + abs(
+            float(test_labels.mean()) - overall_cocoa_rate
+        )
+        if score < best_score:
+            best = (train_index, test_index)
+            best_score = score
+    if best is None:
+        raise RuntimeError(
+            f"None of {attempts} spatial-group splits retained both classes in train "
+            "and holdout sets. Reduce --spatial-block-km when preparing samples or "
+            "collect cocoa samples across more spatial blocks."
+        )
+    return best
+
+
 def main() -> int:
     args = parse_args()
     if not 0.1 <= args.test_fraction <= 0.5:
         raise ValueError("--test-fraction must be between 0.1 and 0.5")
+    if args.split_attempts < 1:
+        raise ValueError("--split-attempts must be positive")
     samples_path = resolve(args.samples or Path(f"data/interim/cocoa_classification/{args.year}/{args.season}/training_samples.csv"))
     output_dir = resolve(args.output_dir or Path(f"models/cocoa_classification/{args.year}/{args.season}"))
     data = pd.read_csv(samples_path)
@@ -76,11 +117,15 @@ def main() -> int:
         raise ValueError(f"Training data lacks fields: {sorted(missing)}")
     if data["label"].nunique() != 2 or data["spatial_group"].nunique() < 4:
         raise ValueError("Training requires both classes and at least four spatial groups")
-    splitter = GroupShuffleSplit(n_splits=1, test_size=args.test_fraction, random_state=args.seed)
-    train_index, test_index = next(splitter.split(data, data["label"], groups=data["spatial_group"]))
+    train_index, test_index = select_spatial_split(
+        data, args.test_fraction, args.seed, args.split_attempts
+    )
     train, test = data.iloc[train_index], data.iloc[test_index]
-    if train["label"].nunique() != 2 or test["label"].nunique() != 2:
-        raise RuntimeError("Spatial split did not retain both classes; change --seed or spatial block size")
+    log(
+        f"Spatial split selected: train={len(train)} "
+        f"({int(train['label'].sum())} cocoa), holdout={len(test)} "
+        f"({int(test['label'].sum())} cocoa); no shared blocks"
+    )
     output_dir.mkdir(parents=True, exist_ok=True)
     metric_rows = []
     for name, model in build_models(args.seed, args.n_jobs).items():
