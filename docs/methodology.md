@@ -15,3 +15,53 @@
 Area estimates should be adjusted for classification error when the sampling
 design supports statistically valid correction.
 
+## Cocoa versus natural-tree classification (2017)
+
+Dynamic World class `1` is used only as a tree-domain mask. Within that mask,
+Sentinel-2 spectral features are used to distinguish cocoa (`2` in the final
+map) from natural tree (`1`). Pixels outside the Dynamic World tree mask are
+class `0`, and nodata is `255`.
+
+The downloaded composite contains the ten bands needed by this workflow:
+`B2, B3, B4, B5, B6, B7, B8, B8A, B11, B12`. All reflectance values are divided
+by 10,000 before calculating NDVI, EVI, NDRE, NDRE2, NDMI, NBR, GNDVI, SAVI,
+RECI, and IRECI. Red-edge and SWIR bands delivered at 10 m by the downloader
+were resampled by Earth Engine during export; this must be reported as an
+effective 10 m analysis grid, not native 10 m information for every band.
+
+Run the pipeline from the repository root:
+
+```bash
+python scripts/cocoa_classification/01_create_dw_tree_mask.py --year 2017 --season djf
+python scripts/cocoa_classification/02_calculate_spectral_indices.py --year 2017 --season djf
+python scripts/cocoa_classification/03_prepare_training_samples.py --year 2017 --season djf
+python scripts/cocoa_classification/04_train_models.py --year 2017 --season djf
+
+python scripts/cocoa_classification/05_predict_tree_classes.py --year 2017 --season djf --model random_forest
+python scripts/cocoa_classification/05_predict_tree_classes.py --year 2017 --season djf --model xgboost
+python scripts/cocoa_classification/05_predict_tree_classes.py --year 2017 --season djf --model mlp
+
+python scripts/cocoa_classification/06_mosaic_tree_classification.py --year 2017 --season djf --model random_forest
+```
+
+The model comparison uses a spatial-group holdout rather than a random pixel
+split, reducing overly optimistic accuracy caused by nearby, spatially
+autocorrelated samples. Model selection should consider cocoa precision,
+recall, F1, ROC AUC, and the confusion matrix—not accuracy alone.
+
+### Reference-data limitation
+
+The 500 cocoa points provide positive labels only. The preparation script
+therefore draws a configurable number of Dynamic World tree pixels at least
+1,000 m from known cocoa points and labels them `pseudo_natural`. Some unknown
+cocoa farms can occur in that set, producing label noise. These pseudo-labels
+are suitable for model development but do not provide an independent accuracy
+assessment. Before publishing final area or change estimates, collect or
+visually interpret representative natural-tree reference samples and reserve a
+separate, probability-based sample for unbiased map validation and area-error
+adjustment.
+
+The 2017 cocoa points should not be reused as independent validation samples
+after being used for training or threshold selection. For predictions in other
+years, check temporal transfer explicitly or create year-specific reference
+data; spectral relationships and plantation age can change over time.
