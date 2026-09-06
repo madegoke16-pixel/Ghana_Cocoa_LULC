@@ -37,7 +37,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    dw_path = resolve(args.dw_raster or Path(f"data/processed/dynamicworld/ghana_cocoa_dynamicworld_{args.year}_mode_clipped.tif"))
+    dw_path = resolve(args.dw_raster or Path(f"data/processed/dynamicworld/ghana_cocoa_dynamicworld_{args.year}_gapfilled_clipped.tif"))
     sentinel_dir = resolve(args.reference_sentinel_dir or Path(f"data/raw/sentinel2/djf_{args.year}"))
     output_dir = resolve(args.output_dir or Path(f"data/interim/cocoa_classification/{args.year}/annual/tree_masks"))
     tiles = sorted(sentinel_dir.glob(f"ghana_cocoa_s2_djf_{args.year}_*.tif"))
@@ -45,8 +45,8 @@ def main() -> int:
         raise FileNotFoundError(f"Missing Dynamic World raster or Sentinel tiles: {dw_path}, {sentinel_dir}")
     output_dir.mkdir(parents=True, exist_ok=True)
     with rasterio.open(dw_path) as dw:
-        if dw.count != 1 or dw.crs is None:
-            raise ValueError("Dynamic World input must be a one-band georeferenced raster")
+        if dw.count < 1 or dw.crs is None:
+            raise ValueError("Dynamic World input must contain a georeferenced label band")
         for index, tile in enumerate(tiles, 1):
             destination = output_dir / paired_name(tile, "s2_djf", "dw_tree")
             if destination.exists() and not args.overwrite:

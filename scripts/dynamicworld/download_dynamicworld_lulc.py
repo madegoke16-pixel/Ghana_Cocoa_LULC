@@ -34,13 +34,16 @@ from urllib.request import urlopen
 
 import ee
 import geopandas as gpd
+import numpy as np
+import pandas as pd
+import rasterio
 from dotenv import load_dotenv
 from shapely.geometry import box, mapping
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(PROJECT_ROOT / ".env")
-DEFAULT_AOI = Path("assets/aoi_bounding_box.gpkg")
+DEFAULT_AOI = Path("assets/study_area_gp.gpkg")
 DEFAULT_OUTPUT = Path("data/raw/dynamicworld")
 DEFAULT_GRID_CRS = "EPSG:32630"
 COLLECTION_ID = "GOOGLE/DYNAMICWORLD/V1"
@@ -111,6 +114,14 @@ def parse_args() -> argparse.Namespace:
         help="Network timeout while transferring each GeoTIFF (default: 900 seconds).",
     )
     parser.add_argument("--overwrite", action="store_true")
+    parser.add_argument(
+        "--temporal-gap-fill",
+        action="store_true",
+        help=(
+            "Fill missing target-year pixels first from Jul-Dec of the previous "
+            "year, then Jan-Jun of the following year; export a source-QA band."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -168,9 +179,7 @@ def make_tiles(aoi: gpd.GeoDataFrame, grid_crs: str, tile_size_km: float) -> lis
     return tiles
 
 
-def annual_mode(year: int, region: ee.Geometry) -> ee.Image:
-    start = f"{year}-01-01"
-    end = f"{year + 1}-01-01"
+def mode_for_period(start: str, end: str, region: ee.Geometry) -> tuple[ee.Image, int]:
     collection = (
         ee.ImageCollection(COLLECTION_ID)
         .filterDate(start, end)
@@ -179,9 +188,36 @@ def annual_mode(year: int, region: ee.Geometry) -> ee.Image:
     )
     count = collection.size().getInfo()
     if not count:
-        raise RuntimeError(f"No Dynamic World scenes found for {year}")
+        raise RuntimeError(f"No Dynamic World scenes found from {start} to {end}")
+    return collection.mode().rename("label"), count
+
+
+def annual_mode(year: int, region: ee.Geometry, temporal_gap_fill: bool) -> ee.Image:
+    start = f"{year}-01-01"
+    end = f"{year + 1}-01-01"
+    primary, count = mode_for_period(start, end, region)
     log(f"Dynamic World scenes intersecting AOI in {year}: {count}")
-    return collection.mode().rename("label").unmask(NODATA).toInt16()
+    if not temporal_gap_fill:
+        return primary.unmask(NODATA).toInt16()
+
+    previous_start, previous_end = f"{year - 1}-07-01", f"{year}-01-01"
+    next_start, next_end = f"{year + 1}-01-01", f"{year + 1}-07-01"
+    previous, previous_count = mode_for_period(previous_start, previous_end, region)
+    following, next_count = mode_for_period(next_start, next_end, region)
+    log(
+        f"Gap-fill scenes: {previous_start} to {previous_end}={previous_count}; "
+        f"{next_start} to {next_end}={next_count}"
+    )
+    label = primary.unmask(previous).unmask(following).unmask(NODATA).rename("label")
+    # Priority is expressed by applying lower-priority masks first.
+    source = (
+        ee.Image.constant(255)
+        .where(following.mask(), 2)
+        .where(previous.mask(), 1)
+        .where(primary.mask(), 0)
+        .rename("fill_source")
+    )
+    return label.addBands(source).toInt16()
 
 
 def download_file(url: str, destination: Path, timeout_seconds: int) -> None:
@@ -203,10 +239,11 @@ def download_tile(
     scale: float,
     retries: int,
     download_timeout_seconds: int,
+    bands: list[str],
 ) -> None:
     region = ee.Geometry(geometry)
     parameters = {
-        "bands": ["label"],
+        "bands": bands,
         "region": region,
         "scale": scale,
         "crs": "EPSG:4326",
@@ -227,6 +264,45 @@ def download_tile(
                 f"retrying in {delay} seconds ..."
             )
             sleep(delay)
+
+
+def valid_tile(path: Path, expected_bands: int) -> bool:
+    try:
+        with rasterio.open(path) as source:
+            return (
+                source.count == expected_bands
+                and source.width > 0
+                and source.height > 0
+                and source.crs is not None
+            )
+    except (OSError, rasterio.errors.RasterioError):
+        return False
+
+
+def write_gapfill_summary(tile_paths: list[Path], year: int, output_dir: Path) -> None:
+    counts = {0: 0, 1: 0, 2: 0, 255: 0}
+    for path in tile_paths:
+        with rasterio.open(path) as source:
+            labels = source.read(1)
+            provenance = source.read(2)
+            valid = (labels >= 0) & (labels <= 8)
+            for code in (0, 1, 2):
+                counts[code] += int(np.count_nonzero(valid & (provenance == code)))
+            counts[255] += int(np.count_nonzero(~valid | (provenance == 255)))
+    total = sum(counts.values())
+    rows = [
+        {"source_code": 0, "source_period": str(year), "pixel_count": counts[0]},
+        {"source_code": 1, "source_period": f"{year - 1}-07-01 to {year - 1}-12-31", "pixel_count": counts[1]},
+        {"source_code": 2, "source_period": f"{year + 1}-01-01 to {year + 1}-06-30", "pixel_count": counts[2]},
+        {"source_code": 255, "source_period": "unresolved_nodata", "pixel_count": counts[255]},
+    ]
+    frame = pd.DataFrame(rows)
+    frame["percent"] = np.where(total > 0, frame["pixel_count"] / total * 100, 0).round(6)
+    destination = output_dir / f"ghana_cocoa_dynamicworld_{year}_gapfill_sources.csv"
+    temporary = destination.with_suffix(".part.csv")
+    frame.to_csv(temporary, index=False)
+    temporary.replace(destination)
+    log(f"Saved gap-fill pixel summary: {destination}")
 
 
 def main() -> int:
@@ -265,14 +341,18 @@ def main() -> int:
 
     entire_aoi = ee.Geometry(mapping(aoi.to_crs("EPSG:4326").geometry.union_all()))
     for year in years:
-        image = annual_mode(year, entire_aoi)
+        image = annual_mode(year, entire_aoi, args.temporal_gap_fill)
+        bands = ["label", "fill_source"] if args.temporal_gap_fill else ["label"]
+        product = "gapfilled" if args.temporal_gap_fill else "mode"
         log(f"Downloading annual mode for {year} ...")
+        completed_tiles = []
         for index, (row, col, geometry) in enumerate(tiles, start=1):
             destination = output_dir / (
-                f"ghana_cocoa_dynamicworld_{year}_mode_r{row:03d}_c{col:03d}.tif"
+                f"ghana_cocoa_dynamicworld_{year}_{product}_r{row:03d}_c{col:03d}.tif"
             )
-            if destination.exists() and not args.overwrite:
+            if destination.exists() and not args.overwrite and valid_tile(destination, len(bands)):
                 log(f"[{index}/{len(tiles)}] Exists; skipping {destination.name}")
+                completed_tiles.append(destination)
                 continue
             log(f"[{index}/{len(tiles)}] Downloading {destination.name}")
             download_tile(
@@ -282,7 +362,13 @@ def main() -> int:
                 args.scale,
                 args.retries,
                 args.download_timeout_seconds,
+                bands,
             )
+            if not valid_tile(destination, len(bands)):
+                raise RuntimeError(f"Downloaded tile failed validation: {destination}")
+            completed_tiles.append(destination)
+        if args.temporal_gap_fill:
+            write_gapfill_summary(completed_tiles, year, output_dir)
     log("Download complete.")
     return 0
 

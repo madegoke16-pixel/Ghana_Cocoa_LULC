@@ -17,6 +17,15 @@ design supports statistically valid correction.
 
 ## Cocoa versus natural-tree classification (2017)
 
+The 2017 Dynamic World label composite is primary. Pixels that remain masked
+after the 2017 annual mode are filled first from the July-December 2016 mode,
+then from the January-June 2018 mode. A second `fill_source` band records `0`
+for 2017, `1` for late 2016, `2` for early 2018, and `255` for unresolved
+nodata. The accompanying CSV reports pixel counts and percentages by source.
+Temporal filling is applied only to missing pixels; it does not overwrite any
+valid 2017 label. Area results should disclose the fraction sourced outside
+2017.
+
 Dynamic World class `1` is used only as a tree-domain mask. Within that mask,
 Sentinel-2 spectral features are used to distinguish cocoa (`2` in the final
 map) from natural tree (`1`). Pixels outside the Dynamic World tree mask are
@@ -32,6 +41,8 @@ effective 10 m analysis grid, not native 10 m information for every band.
 Run the pipeline from the repository root:
 
 ```bash
+python scripts/dynamicworld/download_dynamicworld_lulc.py --year 2017 --temporal-gap-fill --ee-project YOUR_PROJECT
+python scripts/dynamicworld/mosaic_and_clip_dynamicworld_lulc.py --year 2017 --gap-filled
 python scripts/cocoa_classification/01_create_dw_tree_mask.py --year 2017
 python scripts/cocoa_classification/02_calculate_spectral_indices.py --year 2017 --season djf
 python scripts/cocoa_classification/02b_build_annual_feature_stack.py --year 2017

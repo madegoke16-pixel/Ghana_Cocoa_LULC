@@ -113,8 +113,8 @@ def create_lulc(
     unresolved_tree_pixels = 0
     rejected_model_cocoa = 0
     with rasterio.open(dw_path) as dw, rasterio.open(model_path) as model:
-        if dw.count != 1 or dw.crs is None or model.count != 1 or model.crs is None:
-            raise ValueError("Dynamic World and cocoa classification must be one-band georeferenced rasters")
+        if dw.count < 1 or dw.crs is None or model.count != 1 or model.crs is None:
+            raise ValueError("Dynamic World needs a label band; cocoa classification must have one band")
         crop_window = geometry_window(dw, aoi_shapes, pad_x=0, pad_y=0).round_offsets().round_lengths()
         crop_window = crop_window.intersection(Window(0, 0, dw.width, dw.height))
         output_transform = dw.window_transform(crop_window)
@@ -244,7 +244,7 @@ def main() -> int:
     args = parse_args()
     if args.png_max_size < 100 or args.dpi < 50:
         raise ValueError("--png-max-size must be >=100 and --dpi must be >=50")
-    dw_path = resolve(args.dynamic_world or Path(f"data/processed/dynamicworld/ghana_cocoa_dynamicworld_{args.year}_mode_clipped.tif"))
+    dw_path = resolve(args.dynamic_world or Path(f"data/processed/dynamicworld/ghana_cocoa_dynamicworld_{args.year}_gapfilled_clipped.tif"))
     model_path = resolve(
         args.cocoa_classification
         or Path(f"data/processed/cocoa_classification/mosaics/ghana_cocoa_tree_class_xgboost_annual_{args.year}.tif")

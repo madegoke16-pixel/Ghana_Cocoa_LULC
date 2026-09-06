@@ -15,6 +15,8 @@ Output:
 from __future__ import annotations
 
 import argparse
+import csv
+from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -27,7 +29,7 @@ from rasterio.warp import transform_bounds
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_INPUT_DIR = Path("data/raw/dynamicworld")
 DEFAULT_OUTPUT_DIR = Path("data/processed/dynamicworld")
-DEFAULT_AOI = Path("assets/aoi_bounding_box.gpkg")
+DEFAULT_AOI = Path("assets/study_area_gp.gpkg")
 OUTPUT_NODATA = -1
 
 
@@ -52,8 +54,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--expected-tiles",
         type=int,
-        default=72,
-        help="Expected number of tiles; use 0 to disable this check (default: 72).",
+        default=0,
+        help="Expected number of tiles; 0 disables this check (default: 0).",
     )
     parser.add_argument(
         "--memory-mb",
@@ -62,16 +64,21 @@ def parse_args() -> argparse.Namespace:
         help="Approximate rasterio merge memory limit (default: 256 MB).",
     )
     parser.add_argument("--overwrite", action="store_true")
+    parser.add_argument(
+        "--gap-filled",
+        action="store_true",
+        help="Mosaic two-band label/fill-source tiles created with --temporal-gap-fill.",
+    )
     return parser.parse_args()
 
 
-def validate_tiles(tile_paths: list[Path]) -> tuple[object, tuple[float, float]]:
+def validate_tiles(tile_paths: list[Path], expected_bands: int) -> tuple[object, tuple[float, float]]:
     reference_crs = None
     reference_resolution = None
     for tile_path in tile_paths:
         with rasterio.open(tile_path) as source:
-            if source.count != 1:
-                raise ValueError(f"Expected one band in {tile_path}, found {source.count}")
+            if source.count != expected_bands:
+                raise ValueError(f"Expected {expected_bands} band(s) in {tile_path}, found {source.count}")
             if source.crs is None:
                 raise ValueError(f"Tile has no CRS: {tile_path}")
             if reference_crs is None:
@@ -94,11 +101,11 @@ def get_aoi_bounds(aoi_path: Path, layer: str, target_crs: object) -> tuple:
     return transform_bounds(aoi.crs, target_crs, *aoi.total_bounds, densify_pts=21)
 
 
-def validate_output(output_path: Path, expected_crs: object) -> None:
+def validate_output(output_path: Path, expected_crs: object, expected_bands: int) -> None:
     allowed_values = set(range(9)) | {OUTPUT_NODATA}
     observed_values: set[int] = set()
     with rasterio.open(output_path) as source:
-        if source.count != 1 or source.width < 1 or source.height < 1:
+        if source.count != expected_bands or source.width < 1 or source.height < 1:
             raise RuntimeError("Output has invalid dimensions or band count")
         if source.crs != expected_crs:
             raise RuntimeError(f"Output CRS mismatch: {source.crs} != {expected_crs}")
@@ -108,10 +115,56 @@ def validate_output(output_path: Path, expected_crs: object) -> None:
             unexpected = block_values - allowed_values
             if unexpected:
                 raise RuntimeError(f"Unexpected class values: {sorted(unexpected)}")
+            if expected_bands == 2:
+                source_values = set(map(int, source.read(2, window=window).ravel()))
+                unexpected_sources = source_values - {0, 1, 2, 255, OUTPUT_NODATA}
+                if unexpected_sources:
+                    raise RuntimeError(f"Unexpected fill-source values: {sorted(unexpected_sources)}")
         log(
             f"Validated {source.width} x {source.height} pixels; "
             f"classes={sorted(observed_values)}; CRS={source.crs}"
         )
+
+
+def write_gapfill_summary(output_path: Path, year: int) -> Path:
+    counts: dict[int, int] = defaultdict(int)
+    with rasterio.open(output_path, "r+") as source:
+        source.set_band_description(1, "label")
+        source.set_band_description(2, "fill_source_0_target_1_previous_2_following")
+        for _, window in source.block_windows(1):
+            labels = source.read(1, window=window)
+            provenance = source.read(2, window=window)
+            valid = (labels >= 0) & (labels <= 8)
+            for code in (0, 1, 2):
+                counts[code] += int(((provenance == code) & valid).sum())
+            counts[255] += int((~valid).sum())
+    total = sum(counts.values())
+    periods = {
+        0: str(year),
+        1: f"{year - 1}-07-01 to {year - 1}-12-31",
+        2: f"{year + 1}-01-01 to {year + 1}-06-30",
+        255: "unresolved_nodata",
+    }
+    destination = output_path.with_name(
+        f"ghana_cocoa_dynamicworld_{year}_gapfill_sources_mosaic.csv"
+    )
+    temporary = destination.with_suffix(".part.csv")
+    with temporary.open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.DictWriter(
+            stream, fieldnames=("source_code", "source_period", "pixel_count", "percent")
+        )
+        writer.writeheader()
+        for code in (0, 1, 2, 255):
+            writer.writerow(
+                {
+                    "source_code": code,
+                    "source_period": periods[code],
+                    "pixel_count": counts[code],
+                    "percent": round(100 * counts[code] / total, 6) if total else 0,
+                }
+            )
+    temporary.replace(destination)
+    return destination
 
 
 def main() -> int:
@@ -122,19 +175,21 @@ def main() -> int:
     input_dir = resolve_path(args.input_dir)
     output_dir = resolve_path(args.output_dir)
     aoi_path = resolve_path(args.aoi)
-    pattern = f"ghana_cocoa_dynamicworld_{args.year}_mode_*.tif"
+    product = "gapfilled" if args.gap_filled else "mode"
+    expected_bands = 2 if args.gap_filled else 1
+    pattern = f"ghana_cocoa_dynamicworld_{args.year}_{product}_*.tif"
     tile_paths = sorted(input_dir.glob(pattern))
     if not tile_paths:
         raise FileNotFoundError(f"No tiles found matching {input_dir / pattern}")
     if args.expected_tiles and len(tile_paths) != args.expected_tiles:
         raise RuntimeError(f"Expected {args.expected_tiles} tiles but found {len(tile_paths)}")
 
-    output_path = output_dir / f"ghana_cocoa_dynamicworld_{args.year}_mode_clipped.tif"
+    output_path = output_dir / f"ghana_cocoa_dynamicworld_{args.year}_{product}_clipped.tif"
     if output_path.exists() and not args.overwrite:
         raise FileExistsError(f"Output exists; use --overwrite to replace it: {output_path}")
 
     log(f"Found {len(tile_paths)} tiles for {args.year}; validating metadata ...")
-    target_crs, resolution = validate_tiles(tile_paths)
+    target_crs, resolution = validate_tiles(tile_paths, expected_bands)
     aoi_bounds = get_aoi_bounds(aoi_path, args.aoi_layer, target_crs)
     output_dir.mkdir(parents=True, exist_ok=True)
     temporary_path = output_path.with_name(output_path.stem + ".part.tif")
@@ -150,7 +205,7 @@ def main() -> int:
             res=resolution,
             nodata=OUTPUT_NODATA,
             dtype="int16",
-            indexes=[1],
+            indexes=list(range(1, expected_bands + 1)),
             method="first",
             target_aligned_pixels=True,
             mem_limit=args.memory_mb,
@@ -169,9 +224,12 @@ def main() -> int:
         for source in sources:
             source.close()
 
-    validate_output(temporary_path, target_crs)
+    validate_output(temporary_path, target_crs, expected_bands)
     temporary_path.replace(output_path)
     log(f"Saved: {output_path}")
+    if args.gap_filled:
+        summary_path = write_gapfill_summary(output_path, args.year)
+        log(f"Saved mosaic gap-fill summary: {summary_path}")
     return 0
 
 

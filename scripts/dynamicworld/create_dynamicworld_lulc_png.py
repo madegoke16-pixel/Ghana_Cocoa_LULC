@@ -78,7 +78,7 @@ def main() -> int:
         args.dynamic_world
         or Path(
             f"data/processed/dynamicworld/"
-            f"ghana_cocoa_dynamicworld_{args.year}_mode_clipped.tif"
+            f"ghana_cocoa_dynamicworld_{args.year}_gapfilled_clipped.tif"
         )
     )
     study_path = resolve(args.study_area)
@@ -102,8 +102,8 @@ def main() -> int:
         raise ValueError("Study area contains no valid geometry")
 
     with rasterio.open(raster_path) as source:
-        if source.count != 1 or source.crs is None:
-            raise ValueError("Dynamic World input must be a one-band georeferenced raster")
+        if source.count < 1 or source.crs is None:
+            raise ValueError("Dynamic World input must contain a georeferenced label band")
         study = study.to_crs(source.crs)
         shapes: List[dict] = [geometry.__geo_interface__ for geometry in study.geometry]
         window = geometry_window(source, shapes).round_offsets().round_lengths()
