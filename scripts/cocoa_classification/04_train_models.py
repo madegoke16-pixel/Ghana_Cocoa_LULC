@@ -38,27 +38,22 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--n-jobs", type=int, default=-1)
+    parser.add_argument(
+        "--models",
+        nargs="+",
+        choices=("random_forest", "xgboost", "mlp"),
+        default=["random_forest", "xgboost", "mlp"],
+        help="Models to train (default: all three).",
+    )
     return parser.parse_args()
 
 
-def build_models(seed: int, n_jobs: int) -> dict:
-    try:
-        from xgboost import XGBClassifier
-    except Exception as error:
-        raise RuntimeError(
-            "XGBoost could not be loaded. Install the Python requirements; on macOS "
-            "also install its OpenMP runtime with: brew install libomp"
-        ) from error
+def build_models(seed: int, n_jobs: int, selected: list[str]) -> dict:
     impute = [("imputer", SimpleImputer(strategy="median"))]
-    return {
+    models = {
         "random_forest": Pipeline(impute + [("model", RandomForestClassifier(
             n_estimators=500, max_features="sqrt", min_samples_leaf=2,
             class_weight="balanced", random_state=seed, n_jobs=n_jobs,
-        ))]),
-        "xgboost": Pipeline(impute + [("model", XGBClassifier(
-            n_estimators=500, max_depth=5, learning_rate=0.03,
-            subsample=0.8, colsample_bytree=0.8, eval_metric="logloss",
-            random_state=seed, n_jobs=n_jobs,
         ))]),
         "mlp": Pipeline(impute + [("scaler", StandardScaler()), ("model", MLPClassifier(
             hidden_layer_sizes=(64, 32), activation="relu", alpha=0.001,
@@ -67,6 +62,21 @@ def build_models(seed: int, n_jobs: int) -> dict:
             random_state=seed,
         ))]),
     }
+    if "xgboost" in selected:
+        try:
+            from xgboost import XGBClassifier
+        except Exception as error:
+            raise RuntimeError(
+                "XGBoost could not be loaded. On macOS, install Homebrew and then "
+                "run: brew install libomp. You can train the other models now with "
+                "--models random_forest mlp"
+            ) from error
+        models["xgboost"] = Pipeline(impute + [("model", XGBClassifier(
+            n_estimators=500, max_depth=5, learning_rate=0.03,
+            subsample=0.8, colsample_bytree=0.8, eval_metric="logloss",
+            random_state=seed, n_jobs=n_jobs,
+        ))])
+    return {name: models[name] for name in selected}
 
 
 def select_spatial_split(
@@ -128,7 +138,7 @@ def main() -> int:
     )
     output_dir.mkdir(parents=True, exist_ok=True)
     metric_rows = []
-    for name, model in build_models(args.seed, args.n_jobs).items():
+    for name, model in build_models(args.seed, args.n_jobs, args.models).items():
         log(f"Training {name} on {len(train)} samples; spatial holdout={len(test)}")
         model.fit(train[list(feature_names)], train["label"])
         predicted = model.predict(test[list(feature_names)])
@@ -175,8 +185,13 @@ def main() -> int:
             "train_groups": int(train["spatial_group"].nunique()), "test_groups": int(test["spatial_group"].nunique()),
         }
         write_json_atomic(report, output_dir / f"{name}_evaluation.json")
-    metrics_frame = pd.DataFrame(metric_rows).sort_values("f1_cocoa", ascending=False)
-    metrics_frame.to_csv(output_dir / "model_comparison.csv", index=False)
+    comparison_path = output_dir / "model_comparison.csv"
+    metrics_frame = pd.DataFrame(metric_rows)
+    if comparison_path.exists():
+        previous = pd.read_csv(comparison_path)
+        previous = previous[~previous["model"].isin(metrics_frame["model"])]
+        metrics_frame = pd.concat([previous, metrics_frame], ignore_index=True)
+    metrics_frame.sort_values("f1_cocoa", ascending=False).to_csv(comparison_path, index=False)
     split = data[["source_id", "label", "spatial_group"]].copy()
     split["split"] = np.where(split.index.isin(test_index), "spatial_holdout", "train")
     split.to_csv(output_dir / "sample_split.csv", index=False)

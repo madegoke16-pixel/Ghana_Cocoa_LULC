@@ -45,6 +45,19 @@ python scripts/cocoa_classification/05_predict_tree_classes.py --year 2017 --sea
 python scripts/cocoa_classification/06_mosaic_tree_classification.py --year 2017 --season annual --model random_forest
 ```
 
+After mosaicking the selected XGBoost prediction, create the final LULC map and
+area table with:
+
+```bash
+python scripts/cocoa_classification/07_create_final_lulc_products.py --year 2017
+```
+
+The final map retains Dynamic World codes 0–8, interprets code 1 as
+`other_trees`, and uses the new code 9 for `cocoa_plantation`. Cocoa is assigned
+only where a pixel is both Dynamic World tree and XGBoost cocoa. The GeoTIFF is
+the analysis product; the PNG is a downsampled cartographic preview, and the CSV
+reports pixel counts and areas in hectares and square kilometres.
+
 The model comparison uses a spatial-group holdout rather than a random pixel
 split, reducing overly optimistic accuracy caused by nearby, spatially
 autocorrelated samples. Model selection should consider cocoa precision,
