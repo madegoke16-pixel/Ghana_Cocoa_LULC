@@ -69,6 +69,12 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Mosaic two-band label/fill-source tiles created with --temporal-gap-fill.",
     )
+    parser.add_argument(
+        "--tile-size-km",
+        type=float,
+        default=30.0,
+        help="Gap-filled download grid size used in tile filenames (default: 30).",
+    )
     return parser.parse_args()
 
 
@@ -169,15 +175,21 @@ def write_gapfill_summary(output_path: Path, year: int) -> Path:
 
 def main() -> int:
     args = parse_args()
-    if args.memory_mb < 1 or args.expected_tiles < 0:
-        raise ValueError("Memory must be positive and expected tile count cannot be negative")
+    if args.memory_mb < 1 or args.expected_tiles < 0 or args.tile_size_km <= 0:
+        raise ValueError("Memory/tile size must be positive and expected tile count cannot be negative")
 
     input_dir = resolve_path(args.input_dir)
     output_dir = resolve_path(args.output_dir)
     aoi_path = resolve_path(args.aoi)
     product = "gapfilled" if args.gap_filled else "mode"
     expected_bands = 2 if args.gap_filled else 1
-    pattern = f"ghana_cocoa_dynamicworld_{args.year}_{product}_*.tif"
+    if args.gap_filled:
+        pattern = (
+            f"ghana_cocoa_dynamicworld_{args.year}_{product}_"
+            f"g{args.tile_size_km:g}km_*.tif"
+        )
+    else:
+        pattern = f"ghana_cocoa_dynamicworld_{args.year}_{product}_*.tif"
     tile_paths = sorted(input_dir.glob(pattern))
     if not tile_paths:
         raise FileNotFoundError(f"No tiles found matching {input_dir / pattern}")

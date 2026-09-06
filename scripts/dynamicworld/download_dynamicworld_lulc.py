@@ -91,8 +91,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--tile-size-km",
         type=float,
-        default=40.0,
-        help="Projected grid-cell width/height. Keep small enough for EE's download limit.",
+        default=30.0,
+        help="Projected grid-cell width/height (default: 30 km; safe for two-band gap fill).",
     )
     parser.add_argument("--grid-crs", default=DEFAULT_GRID_CRS)
     parser.add_argument(
@@ -255,6 +255,11 @@ def download_tile(
             download_file(url, destination, download_timeout_seconds)
             return
         except Exception as error:
+            if "Total request size" in str(error):
+                raise RuntimeError(
+                    "Earth Engine download request is too large. Reduce --tile-size-km; "
+                    "30 km or smaller is recommended for the two-band gap-filled product."
+                ) from error
             if attempt == retries:
                 raise
             delay = min(60, 2**attempt)
@@ -314,6 +319,16 @@ def main() -> int:
         or args.download_timeout_seconds < 1
     ):
         raise ValueError("Scale, retries, and timeout values must be positive")
+    output_bands = 2 if args.temporal_gap_fill else 1
+    estimated_bytes = (
+        (args.tile_size_km * 1000 / args.scale) ** 2 * output_bands * 2
+    )
+    if estimated_bytes > 45 * 1024 * 1024:
+        raise ValueError(
+            f"Estimated uncompressed tile size is {estimated_bytes / 1024**2:.1f} MiB, "
+            "too close to or above Earth Engine's 48 MiB limit. Reduce --tile-size-km "
+            "(30 km is recommended for --temporal-gap-fill)."
+        )
     if not args.ee_project:
         raise SystemExit("Provide --ee-project or set EARTHENGINE_PROJECT in .env/environment.")
 
@@ -344,11 +359,12 @@ def main() -> int:
         image = annual_mode(year, entire_aoi, args.temporal_gap_fill)
         bands = ["label", "fill_source"] if args.temporal_gap_fill else ["label"]
         product = "gapfilled" if args.temporal_gap_fill else "mode"
+        grid_tag = f"g{args.tile_size_km:g}km_" if args.temporal_gap_fill else ""
         log(f"Downloading annual mode for {year} ...")
         completed_tiles = []
         for index, (row, col, geometry) in enumerate(tiles, start=1):
             destination = output_dir / (
-                f"ghana_cocoa_dynamicworld_{year}_{product}_r{row:03d}_c{col:03d}.tif"
+                f"ghana_cocoa_dynamicworld_{year}_{product}_{grid_tag}r{row:03d}_c{col:03d}.tif"
             )
             if destination.exists() and not args.overwrite and valid_tile(destination, len(bands)):
                 log(f"[{index}/{len(tiles)}] Exists; skipping {destination.name}")
