@@ -8,6 +8,7 @@ from pathlib import Path
 
 import joblib
 import numpy as np
+import pandas as pd
 import rasterio
 
 from common import FLOAT_NODATA, log, resolve, tiled_profile
@@ -67,7 +68,7 @@ def main() -> int:
                     output_class = np.where(tree == 255, 255, 0).astype("uint8")
                     output_probability = np.full(tree.shape, FLOAT_NODATA, dtype="float32")
                     if valid.any():
-                        matrix = values[:, valid].T
+                        matrix = pd.DataFrame(values[:, valid].T, columns=names)
                         cocoa_probability = model.predict_proba(matrix)[:, 1]
                         output_probability[valid] = cocoa_probability
                         output_class[valid] = np.where(cocoa_probability >= args.threshold, 2, 1)
