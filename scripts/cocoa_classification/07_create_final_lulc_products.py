@@ -4,7 +4,8 @@
 Dynamic World classes are retained, except class 1 is named ``other_trees`` and
 is split with the annual XGBoost result. A pixel becomes class 9
 (``cocoa_plantation``) only when Dynamic World labels it as tree and XGBoost
-labels it as cocoa.
+labels it as cocoa. Dynamic World snow/ice (8) is merged into bare (7), and
+cocoa uses the resulting available final code 8.
 
 Prerequisites:
     python scripts/cocoa_classification/05_predict_tree_classes.py \
@@ -46,7 +47,7 @@ from common import log, resolve
 NODATA = 255
 DW_TREE = 1
 MODEL_COCOA = 2
-COCOA_CLASS = 9
+COCOA_CLASS = 8
 CLASSES = {
     0: ("water", "#419BDF"),
     1: ("other_trees", "#397D49"),
@@ -55,9 +56,8 @@ CLASSES = {
     4: ("crops", "#E49635"),
     5: ("shrub_and_scrub", "#DFC35A"),
     6: ("built", "#C4281B"),
-    7: ("bare", "#A59B8F"),
-    8: ("snow_and_ice", "#B39FE1"),
-    9: ("cocoa_plantation", "#6B3E26"),
+    7: ("bare_and_snow_ice", "#A59B8F"),
+    8: ("cocoa_plantation", "#6B3E26"),
 }
 
 
@@ -66,7 +66,7 @@ def parse_args() -> argparse.Namespace:
         description="Combine yearly Dynamic World and XGBoost cocoa classes into final LULC products."
     )
     parser.add_argument("--year", type=int, default=2017)
-    parser.add_argument("--aoi", type=Path, default=Path("assets/aoi_bounding_box.gpkg"))
+    parser.add_argument("--aoi", type=Path, default=Path("assets/study_area_gp.gpkg"))
     parser.add_argument("--aoi-layer", default=None)
     parser.add_argument("--dynamic-world", type=Path)
     parser.add_argument("--cocoa-classification", type=Path)
@@ -135,7 +135,7 @@ def create_lulc(
             resampling=Resampling.nearest,
             nodata=model.nodata,
         ) as aligned_model, rasterio.open(temporary, "w", **profile) as output:
-            output.set_band_description(1, "lulc_0_8_dynamic_world_1_other_trees_9_cocoa")
+            output.set_band_description(1, "lulc_1_other_trees_7_bare_snow_8_cocoa")
             output.write_colormap(
                 1,
                 {
@@ -150,7 +150,8 @@ def create_lulc(
                 year=str(dw_path.stem),
                 cocoa_rule="Dynamic World tree AND XGBoost class 2",
                 class_1="other_trees",
-                class_9="cocoa_plantation",
+                class_7="bare_and_snow_ice",
+                class_8="cocoa_plantation",
             )
             for _, out_window in output.block_windows(1):
                 source_window = Window(
@@ -168,6 +169,7 @@ def create_lulc(
                 valid_dw = inside & (dw_values >= 0) & (dw_values <= 8)
                 final = np.full(dw_values.shape, NODATA, dtype="uint8")
                 final[valid_dw] = dw_values[valid_dw].astype("uint8")
+                final[valid_dw & (dw_values == 8)] = 7
                 cocoa = valid_dw & (dw_values == DW_TREE) & (model_values == MODEL_COCOA)
                 final[cocoa] = COCOA_CLASS
                 unresolved_tree_pixels += int(
@@ -220,10 +222,10 @@ def write_png(raster_path: Path, png_path: Path, max_size: int, dpi: int, year: 
         values = source.read(1, out_shape=(height, width), resampling=Resampling.nearest)
         extent = (source.bounds.left, source.bounds.right, source.bounds.bottom, source.bounds.top)
     display = np.ma.masked_where(values == NODATA, values)
-    colors = [CLASSES[code][1] for code in range(10)]
+    colors = [CLASSES[code][1] for code in range(9)]
     cmap = ListedColormap(colors)
     cmap.set_bad("white", alpha=0)
-    norm = BoundaryNorm(np.arange(-0.5, 10.5, 1), cmap.N)
+    norm = BoundaryNorm(np.arange(-0.5, 9.5, 1), cmap.N)
     figure, axis = plt.subplots(figsize=(11, 10))
     axis.imshow(display, cmap=cmap, norm=norm, extent=extent, origin="upper", interpolation="nearest")
     axis.set_title(f"Ghana cocoa-region LULC {year}\nDynamic World with XGBoost tree-class subdivision")
