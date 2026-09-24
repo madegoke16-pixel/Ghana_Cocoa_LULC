@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Combine 2017 DJF and wet-season data into aligned 20-band feature tiles.
+"""Combine yearly DJF and wet-season data into aligned 20-band feature tiles.
 
 DJF feature tiles define the output grid. Intersecting wet-season Sentinel-2
 tiles (including retry subdivisions such as ``_s00``) are warped onto that grid

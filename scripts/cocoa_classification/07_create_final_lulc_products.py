@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create final 2017 LULC GeoTIFF, PNG map, and class-area CSV.
+"""Create final yearly LULC GeoTIFF, PNG map, and class-area CSV.
 
 Dynamic World classes are retained, except class 1 is named ``other_trees`` and
 is split with the annual XGBoost result. A pixel becomes class 9
@@ -70,7 +70,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--aoi-layer", default=None)
     parser.add_argument("--dynamic-world", type=Path)
     parser.add_argument("--cocoa-classification", type=Path)
-    parser.add_argument("--output-dir", type=Path, default=Path("outputs/lulc/2017"))
+    parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--png-max-size", type=int, default=3000)
     parser.add_argument("--dpi", type=int, default=200)
     parser.add_argument("--overwrite", action="store_true")
@@ -255,7 +255,7 @@ def main() -> int:
         raise FileNotFoundError(
             f"XGBoost classification mosaic not found: {model_path}\nRun scripts 05 and 06 for --model xgboost first."
         )
-    output_dir = resolve(args.output_dir)
+    output_dir = resolve(args.output_dir or Path(f"outputs/lulc/{args.year}"))
     output_dir.mkdir(parents=True, exist_ok=True)
     tif_path = output_dir / f"ghana_cocoa_lulc_{args.year}_dw_xgboost.tif"
     png_path = output_dir / f"ghana_cocoa_lulc_{args.year}_dw_xgboost.png"

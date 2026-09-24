@@ -72,8 +72,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--tile-size-km",
         type=float,
-        default=30.0,
-        help="Gap-filled download grid size used in tile filenames (default: 30).",
+        default=25.0,
+        help="Gap-filled download grid size used in tile filenames (default: 25).",
     )
     return parser.parse_args()
 

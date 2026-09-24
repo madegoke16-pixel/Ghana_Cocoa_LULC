@@ -25,6 +25,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--year", type=int, default=2017)
     parser.add_argument("--season", choices=("djf", "wet", "annual"), default="annual")
     parser.add_argument("--cocoa-points", type=Path, default=Path("assets/Cocoa_500_samples_2017.kml"))
+    parser.add_argument(
+        "--cocoa-layer",
+        default=None,
+        help="Optional vector layer name, required when a KML contains multiple layers.",
+    )
     parser.add_argument("--feature-dir", type=Path)
     parser.add_argument("--mask-dir", type=Path)
     parser.add_argument("--output", type=Path)
@@ -43,13 +48,18 @@ def main() -> int:
     args = parse_args()
     if args.negative_ratio <= 0 or args.exclusion_buffer_m < 0 or args.spatial_block_km <= 0:
         raise ValueError("Ratios/block size must be positive and the exclusion buffer cannot be negative")
+    if args.year != 2017 and args.cocoa_points == Path("assets/Cocoa_500_samples_2017.kml"):
+        raise ValueError(
+            f"The default cocoa points are labelled for 2017 and cannot train a {args.year} "
+            "model. Provide year-matched reference data with --cocoa-points."
+        )
     feature_dir = resolve(args.feature_dir or Path(f"data/interim/cocoa_classification/{args.year}/{args.season}/features"))
     mask_dir = resolve(args.mask_dir or Path(f"data/interim/cocoa_classification/{args.year}/annual/tree_masks"))
     output = resolve(args.output or Path(f"data/interim/cocoa_classification/{args.year}/{args.season}/training_samples.gpkg"))
     feature_tiles = sorted(feature_dir.glob(f"*indices_{args.year}_*.tif"))
     if not feature_tiles:
         raise FileNotFoundError(f"No feature tiles found in {feature_dir}")
-    points = gpd.read_file(resolve(args.cocoa_points))
+    points = gpd.read_file(resolve(args.cocoa_points), layer=args.cocoa_layer)
     points = points[points.geometry.notna() & ~points.geometry.is_empty].copy()
     if points.empty or points.crs is None or not points.geom_type.eq("Point").all():
         raise ValueError("Cocoa reference file must contain georeferenced Point features")

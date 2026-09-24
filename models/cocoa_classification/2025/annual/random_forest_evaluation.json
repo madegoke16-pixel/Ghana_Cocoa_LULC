@@ -1,0 +1,50 @@
+{
+  "model": "random_forest",
+  "accuracy": 0.7389937106918238,
+  "balanced_accuracy": 0.6580188679245282,
+  "precision_cocoa": 0.676923076923077,
+  "recall_cocoa": 0.41509433962264153,
+  "f1_cocoa": 0.5146198830409356,
+  "roc_auc": 0.7733179067283732,
+  "confusion_matrix_rows_actual_cols_predicted": [
+    [
+      191,
+      21
+    ],
+    [
+      62,
+      44
+    ]
+  ],
+  "classification_report": {
+    "pseudo_natural": {
+      "precision": 0.7549407114624506,
+      "recall": 0.9009433962264151,
+      "f1-score": 0.821505376344086,
+      "support": 212.0
+    },
+    "cocoa": {
+      "precision": 0.676923076923077,
+      "recall": 0.41509433962264153,
+      "f1-score": 0.5146198830409356,
+      "support": 106.0
+    },
+    "accuracy": 0.7389937106918238,
+    "macro avg": {
+      "precision": 0.7159318941927637,
+      "recall": 0.6580188679245282,
+      "f1-score": 0.6680626296925108,
+      "support": 318.0
+    },
+    "weighted avg": {
+      "precision": 0.7289348332826594,
+      "recall": 0.7389937106918238,
+      "f1-score": 0.7192102119097025,
+      "support": 318.0
+    }
+  },
+  "train_samples": 951,
+  "test_samples": 318,
+  "train_groups": 115,
+  "test_groups": 39
+}

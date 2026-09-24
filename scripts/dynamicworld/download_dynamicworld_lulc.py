@@ -91,8 +91,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--tile-size-km",
         type=float,
-        default=30.0,
-        help="Projected grid-cell width/height (default: 30 km; safe for two-band gap fill).",
+        default=25.0,
+        help="Projected grid-cell width/height (default: 25 km; safe for two-band gap fill).",
     )
     parser.add_argument("--grid-crs", default=DEFAULT_GRID_CRS)
     parser.add_argument(
@@ -258,7 +258,7 @@ def download_tile(
             if "Total request size" in str(error):
                 raise RuntimeError(
                     "Earth Engine download request is too large. Reduce --tile-size-km; "
-                    "30 km or smaller is recommended for the two-band gap-filled product."
+                    "25 km or smaller is recommended for the two-band gap-filled product."
                 ) from error
             if attempt == retries:
                 raise
@@ -327,7 +327,7 @@ def main() -> int:
         raise ValueError(
             f"Estimated uncompressed tile size is {estimated_bytes / 1024**2:.1f} MiB, "
             "too close to or above Earth Engine's 48 MiB limit. Reduce --tile-size-km "
-            "(30 km is recommended for --temporal-gap-fill)."
+            "(25 km is recommended for --temporal-gap-fill)."
         )
     if not args.ee_project:
         raise SystemExit("Provide --ee-project or set EARTHENGINE_PROJECT in .env/environment.")
